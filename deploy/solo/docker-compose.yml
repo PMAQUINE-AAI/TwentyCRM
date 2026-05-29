@@ -1,0 +1,109 @@
+# TwentyCRM — stack « solopreneur » auto-hébergé (self-contained).
+#
+# 4 conteneurs : server (API+front) · worker (jobs) · db (PostgreSQL 16) · redis.
+# Basé sur packages/twenty-docker/docker-compose.yml, avec les drapeaux mono-
+# utilisateur ajoutés et les options cloud (S3, OAuth) retirées pour la clarté.
+#
+# Démarrage :
+#   cp .env.example .env   # puis remplir les CHANGE_ME
+#   docker compose up -d
+name: twenty-solo
+
+services:
+  server:
+    image: twentycrm/twenty:${TAG:-latest}
+    volumes:
+      - server-local-data:/app/packages/twenty-server/.local-storage
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_PORT: 3000
+      PG_DATABASE_URL: postgres://${PG_DATABASE_USER:-postgres}:${PG_DATABASE_PASSWORD:-postgres}@${PG_DATABASE_HOST:-db}:${PG_DATABASE_PORT:-5432}/default
+      SERVER_URL: ${SERVER_URL}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      FALLBACK_ENCRYPTION_KEY: ${FALLBACK_ENCRYPTION_KEY:-}
+      STORAGE_TYPE: ${STORAGE_TYPE:-local}
+      # --- profil solo ---
+      IS_MULTIWORKSPACE_ENABLED: ${IS_MULTIWORKSPACE_ENABLED:-false}
+      IS_BILLING_ENABLED: ${IS_BILLING_ENABLED:-false}
+      AUTH_PASSWORD_ENABLED: ${AUTH_PASSWORD_ENABLED:-true}
+      IS_EMAIL_VERIFICATION_REQUIRED: ${IS_EMAIL_VERIFICATION_REQUIRED:-false}
+      IS_WORKSPACE_CREATION_LIMITED_TO_SERVER_ADMINS: ${IS_WORKSPACE_CREATION_LIMITED_TO_SERVER_ADMINS:-true}
+      # --- emails (logger par défaut ; SMTP si défini dans .env) ---
+      EMAIL_DRIVER: ${EMAIL_DRIVER:-logger}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-contact@example.com}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Mon CRM}
+      EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST:-}
+      EMAIL_SMTP_PORT: ${EMAIL_SMTP_PORT:-}
+      EMAIL_SMTP_USER: ${EMAIL_SMTP_USER:-}
+      EMAIL_SMTP_PASSWORD: ${EMAIL_SMTP_PASSWORD:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: curl --fail http://localhost:3000/healthz
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: always
+
+  worker:
+    image: twentycrm/twenty:${TAG:-latest}
+    volumes:
+      - server-local-data:/app/packages/twenty-server/.local-storage
+    command: ["yarn", "worker:prod"]
+    environment:
+      PG_DATABASE_URL: postgres://${PG_DATABASE_USER:-postgres}:${PG_DATABASE_PASSWORD:-postgres}@${PG_DATABASE_HOST:-db}:${PG_DATABASE_PORT:-5432}/default
+      SERVER_URL: ${SERVER_URL}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DISABLE_DB_MIGRATIONS: "true"            # migrations gérées par le server
+      DISABLE_CRON_JOBS_REGISTRATION: "true"   # cron géré par le server
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      FALLBACK_ENCRYPTION_KEY: ${FALLBACK_ENCRYPTION_KEY:-}
+      STORAGE_TYPE: ${STORAGE_TYPE:-local}
+      IS_BILLING_ENABLED: ${IS_BILLING_ENABLED:-false}
+      EMAIL_DRIVER: ${EMAIL_DRIVER:-logger}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-contact@example.com}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Mon CRM}
+      EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST:-}
+      EMAIL_SMTP_PORT: ${EMAIL_SMTP_PORT:-}
+      EMAIL_SMTP_USER: ${EMAIL_SMTP_USER:-}
+      EMAIL_SMTP_PASSWORD: ${EMAIL_SMTP_PASSWORD:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      server:
+        condition: service_healthy
+    restart: always
+
+  db:
+    image: postgres:16
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${PG_DATABASE_NAME:-default}
+      POSTGRES_PASSWORD: ${PG_DATABASE_PASSWORD:-postgres}
+      POSTGRES_USER: ${PG_DATABASE_USER:-postgres}
+    healthcheck:
+      test: pg_isready -U ${PG_DATABASE_USER:-postgres} -h localhost -d postgres
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: always
+
+  redis:
+    image: redis
+    restart: always
+    command: ["--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  db-data:
+  server-local-data:
