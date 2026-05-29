@@ -222,3 +222,26 @@ This handles everything: starts Postgres + Redis (auto-detects local services vs
 - `tsconfig.base.json` - Base TypeScript configuration
 - `package.json` - Root package with workspace definitions
 - `.cursor/rules/` - Detailed development guidelines and best practices
+
+## AI tooling: gstack + ruflo (optional, auto-installed)
+
+This repo is set up with two third-party Claude skill collections for personal use:
+
+- **gstack** ([garrytan/gstack](https://github.com/garrytan/gstack)) — opinionated workflow skills (`/review`, `/ship`, `/qa`, `/investigate`, `/browse`, plan reviews, etc.).
+- **ruflo** ([ruvnet/ruflo](https://github.com/ruvnet/ruflo)) — multi-agent orchestration skills (swarm, SPARC, memory, GitHub automation).
+
+These install automatically at session start via `.claude/hooks/session-start.sh`
+(registered as a `SessionStart` hook in `.claude/settings.json`). The hook is
+idempotent and only reinstalls what is missing — necessary because the web
+execution environment is ephemeral and `.claude/` (where most of these skills
+live) is gitignored.
+
+If a skill is unavailable, gstack/ruflo simply haven't finished installing yet —
+this is not a hard requirement and never blocks normal work. To install manually:
+
+```bash
+bash .claude/hooks/session-start.sh
+```
+
+gstack files live at the global path `~/.claude/skills/gstack/...`; ruflo skills
+live under the project `.claude/skills/`.

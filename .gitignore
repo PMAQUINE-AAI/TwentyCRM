@@ -1,7 +1,15 @@
 **/**/.env
 .DS_Store
 /.idea
-.claude/
+# Ignore local Claude config, but keep the committed SessionStart bootstrap
+# (installs gstack + ruflo skills — see CLAUDE.md "AI tooling" section).
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
+.claude/hooks/*
+!.claude/hooks/session-start.sh
+# ruflo runtime data/logs/sessions — never commit
+.claude-flow/
 .cursor/debug-*.log
 **/**/node_modules/
 .cache
