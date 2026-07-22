@@ -268,7 +268,10 @@ nano .env
 
 Colle ceci, puis remplace les `CHANGE_ME` et **`TON_IP`** :
 ```
-TAG=latest
+# Version pinnée (jamais "latest" : une mise à jour surprise peut migrer la
+# base de données sans retour arrière possible). Liste des versions :
+# https://github.com/twentyhq/twenty/releases
+TAG=v2.22.1
 SERVER_URL=http://TON_IP:3000
 
 PG_DATABASE_USER=postgres
