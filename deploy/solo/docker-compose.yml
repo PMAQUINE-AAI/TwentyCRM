@@ -1,27 +1,35 @@
 # TwentyCRM — stack « solopreneur » auto-hébergé (self-contained).
 #
 # 4 conteneurs : server (API+front) · worker (jobs) · db (PostgreSQL 16) · redis.
+# + 1 optionnel : caddy (HTTPS automatique) via `--profile proxy`.
 # Basé sur packages/twenty-docker/docker-compose.yml, avec les drapeaux mono-
 # utilisateur ajoutés et les options cloud (S3, OAuth) retirées pour la clarté.
 #
 # Démarrage :
 #   cp .env.example .env   # puis remplir les CHANGE_ME
 #   docker compose up -d
+# Avec HTTPS (domaine requis, voir CADDY_DOMAIN dans .env) :
+#   docker compose --profile proxy up -d
 name: twenty-solo
 
 services:
   server:
-    image: twentycrm/twenty:${TAG:-latest}
+    # TAG est volontairement sans défaut : pinner une version dans .env.
+    # `latest` peut sauter plusieurs versions majeures et exécuter des
+    # migrations DB irréversibles lors d'un simple `docker compose pull`.
+    image: twentycrm/twenty:${TAG:?set TAG in .env (pinned version, e.g. v2.22.1)}
     volumes:
       - server-local-data:/app/packages/twenty-server/.local-storage
     ports:
-      - "3000:3000"
+      # 127.0.0.1 par défaut : pas d'exposition HTTP en clair sur internet.
+      # Accès direct par IP (sans proxy TLS) : BIND_IP=0.0.0.0 dans .env.
+      - "${BIND_IP:-127.0.0.1}:3000:3000"
     environment:
       NODE_PORT: 3000
-      PG_DATABASE_URL: postgres://${PG_DATABASE_USER:-postgres}:${PG_DATABASE_PASSWORD:-postgres}@${PG_DATABASE_HOST:-db}:${PG_DATABASE_PORT:-5432}/default
+      PG_DATABASE_URL: postgres://${PG_DATABASE_USER:-postgres}:${PG_DATABASE_PASSWORD:?set PG_DATABASE_PASSWORD in .env}@${PG_DATABASE_HOST:-db}:${PG_DATABASE_PORT:-5432}/default
       SERVER_URL: ${SERVER_URL}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env (openssl rand -base64 32)}
       FALLBACK_ENCRYPTION_KEY: ${FALLBACK_ENCRYPTION_KEY:-}
       STORAGE_TYPE: ${STORAGE_TYPE:-local}
       # --- profil solo ---
@@ -48,20 +56,23 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+      # Premier démarrage : les migrations complètes peuvent dépasser 100 s
+      # sur un petit VPS — sans start_period, le worker part en boucle de restart.
+      start_period: 120s
     restart: always
 
   worker:
-    image: twentycrm/twenty:${TAG:-latest}
+    image: twentycrm/twenty:${TAG:?set TAG in .env (pinned version, e.g. v2.22.1)}
     volumes:
       - server-local-data:/app/packages/twenty-server/.local-storage
     command: ["yarn", "worker:prod"]
     environment:
-      PG_DATABASE_URL: postgres://${PG_DATABASE_USER:-postgres}:${PG_DATABASE_PASSWORD:-postgres}@${PG_DATABASE_HOST:-db}:${PG_DATABASE_PORT:-5432}/default
+      PG_DATABASE_URL: postgres://${PG_DATABASE_USER:-postgres}:${PG_DATABASE_PASSWORD:?set PG_DATABASE_PASSWORD in .env}@${PG_DATABASE_HOST:-db}:${PG_DATABASE_PORT:-5432}/default
       SERVER_URL: ${SERVER_URL}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       DISABLE_DB_MIGRATIONS: "true"            # migrations gérées par le server
       DISABLE_CRON_JOBS_REGISTRATION: "true"   # cron géré par le server
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env (openssl rand -base64 32)}
       FALLBACK_ENCRYPTION_KEY: ${FALLBACK_ENCRYPTION_KEY:-}
       STORAGE_TYPE: ${STORAGE_TYPE:-local}
       IS_BILLING_ENABLED: ${IS_BILLING_ENABLED:-false}
@@ -85,7 +96,7 @@ services:
       - db-data:/var/lib/postgresql/data
     environment:
       POSTGRES_DB: ${PG_DATABASE_NAME:-default}
-      POSTGRES_PASSWORD: ${PG_DATABASE_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${PG_DATABASE_PASSWORD:?set PG_DATABASE_PASSWORD in .env}
       POSTGRES_USER: ${PG_DATABASE_USER:-postgres}
     healthcheck:
       test: pg_isready -U ${PG_DATABASE_USER:-postgres} -h localhost -d postgres
@@ -95,15 +106,43 @@ services:
     restart: always
 
   redis:
-    image: redis
+    # Version pinnée + persistance AOF : sans elle, les jobs BullMQ en attente
+    # (workflows, syncs, emails) sont perdus à chaque restart du conteneur.
+    image: redis:7-alpine
     restart: always
-    command: ["--maxmemory-policy", "noeviction"]
+    command: ["redis-server", "--maxmemory-policy", "noeviction", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 10
 
+  # Reverse-proxy HTTPS automatique (Let's Encrypt). Optionnel :
+  #   docker compose --profile proxy up -d
+  # Requiert un domaine pointant vers le serveur + CADDY_DOMAIN dans .env.
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["proxy"]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Pas de `:?` ici : compose interpole même les profils inactifs.
+      CADDY_DOMAIN: ${CADDY_DOMAIN:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: always
+
 volumes:
   db-data:
   server-local-data:
+  redis-data:
+  caddy-data:
+  caddy-config:

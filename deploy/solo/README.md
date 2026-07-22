@@ -23,18 +23,23 @@ En mode `IS_MULTIWORKSPACE_ENABLED=false`, aucun second workspace ne pourra êtr
 
 ## Mise en production (domaine + HTTPS)
 
-1. Pointez un domaine (`crm.mondomaine.com`) vers le serveur.
-2. Mettez `SERVER_URL=https://crm.mondomaine.com` dans `.env`.
-3. Placez un reverse-proxy TLS devant le port 3000 (Caddy/Traefik/Nginx).
-   Exemple Caddy : `crm.mondomaine.com { reverse_proxy localhost:3000 }`
-4. `docker compose up -d`
+Un service Caddy (HTTPS automatique via Let's Encrypt) est intégré au compose,
+désactivé par défaut :
+
+1. Pointez un domaine (`crm.mondomaine.com`) vers le serveur (ports 80/443 ouverts).
+2. Dans `.env` : `SERVER_URL=https://crm.mondomaine.com` et `CADDY_DOMAIN=crm.mondomaine.com`.
+3. `docker compose --profile proxy up -d`
+
+Le port 3000 reste lié à `127.0.0.1` : rien ne transite en HTTP clair sur internet.
+Pour un accès direct par IP sans TLS (test uniquement) : `BIND_IP=0.0.0.0` dans `.env`.
 
 ## Opérations courantes
 
 ```bash
 docker compose ps                 # état des conteneurs
 docker compose logs -f worker     # logs des jobs (emails, syncs, webhooks)
-docker compose pull && docker compose up -d   # mise à jour (voir note ci-dessous)
+# mise à jour : sauvegarder, puis incrémenter TAG dans .env, puis :
+docker compose pull && docker compose up -d   # (voir note ci-dessous)
 docker compose down               # arrêt (les volumes persistent)
 ```
 

@@ -1,0 +1,5 @@
+# HTTPS automatique (Let's Encrypt) pour TwentyCRM.
+# Le domaine vient de CADDY_DOMAIN dans .env (service `caddy` du compose).
+{$CADDY_DOMAIN} {
+	reverse_proxy server:3000
+}
